@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="sr-Latn">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Snake – Golden Circle</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;800&display=swap">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="golden-theme">
+  <div id="app" class="noselect">
+
+    <!-- Naslov -->
+    <header id="author">
+      <h1>SNAKE</h1>
+      <span>by Golden Circle</span>
+    </header>
+
+    <!-- Glavni layout -->
+    <div class="layout">
+
+      <!-- Leva strana: igra -->
+      <div class="game-area">
+        <!-- FIX: dodat id="game-wrapper" koji je bio referenciran u script.js -->
+        <div id="game-wrapper">
+          <canvas id="game" width="400" height="400"></canvas>
+          <div id="start-hint">
+            <div class="hint-content">
+              <span class="hint-title">🐍 SNAKE</span>
+              <span class="hint-keys"><i class="fas fa-arrow-up"></i><i class="fas fa-arrow-down"></i><i class="fas fa-arrow-left"></i><i class="fas fa-arrow-right"></i> &nbsp;ili&nbsp; WASD</span>
+              <span class="hint-sub">SPACE / P — pauza</span>
+              <span class="hint-cta">Pritisni START</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Touch kontrole za mobilne uređaje -->
+        <div id="touch-controls">
+          <button class="control-btn" data-dir="up"><i class="fas fa-arrow-up"></i></button>
+          <div class="middle-row">
+            <button class="control-btn" data-dir="left"><i class="fas fa-arrow-left"></i></button>
+            <button class="control-btn" data-dir="right"><i class="fas fa-arrow-right"></i></button>
+          </div>
+          <button class="control-btn" data-dir="down"><i class="fas fa-arrow-down"></i></button>
+        </div>
+
+        <!-- Izbor boja / tema -->
+        <div id="snake-colors">
+          <button data-theme="golden" class="active">Golden</button>
+          <button data-theme="neon">Neon</button>
+          <button data-theme="retro">Retro</button>
+          <button data-theme="matrix">Matrix</button>
+        </div>
+      </div>
+
+      <!-- Desna strana: UI + leaderboard -->
+      <div class="sidebar">
+        <!-- UI Score + kontrole -->
+        <div id="ui">
+          <h2>SCORE</h2>
+          <span id="score">00</span>
+        <div id="controls">
+  <button id="start"><i class="fas fa-play"></i> START</button>
+  <button id="replay"><i class="fas fa-redo"></i> RESTART</button>
+  <button id="daily-btn"><i class="fas fa-calendar-day"></i> DAILY</button>
+  <button id="mute-btn"><i class="fas fa-volume-up"></i> SOUND</button>
+</div>
+          <!-- FIX: Difficulty selector dodat -->
+          <div id="difficulty">
+            <span>SPEED</span>
+            <div id="diff-buttons">
+              <button data-delay="8" class="diff-btn active">Easy</button>
+              <button data-delay="5" class="diff-btn">Normal</button>
+              <button data-delay="3" class="diff-btn">Hard</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Leaderboard -->
+        <div id="leaderboard">
+          <h2>TOP</h2>
+          <ol id="scores-list"></ol>
+        </div>
+
+        <!-- Achievements -->
+        <div id="achievements-panel">
+          <h2>ACHIEVEMENTS</h2>
+          <ul id="achievements-list"></ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal Game Over -->
+    <div id="game-over-modal" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="modal-content">
+        <h2>Game Over</h2>
+        <!-- FIX: p tag sada koristi innerHTML sa <br> umesto \n -->
+        <p id="final-score"></p>
+        <button id="close-modal">Play Again</button>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
