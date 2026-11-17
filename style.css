@@ -124,6 +124,25 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .icon-btn:active:not(:disabled) { transform: scale(0.93); }
 .icon-btn.is-off { color: var(--muted); }
 
+a.icon-btn { text-decoration: none; }
+.ig-btn:active { transform: scale(0.93); }
+@media (hover: hover) { .ig-btn:hover { color: var(--gold); border-color: var(--line); } }
+
+.ig-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  text-decoration: none;
+  border-radius: 10px;
+}
+.ig-link svg { width: 18px; height: 18px; }
+.ig-link:active, .ig-link:hover { color: var(--gold); }
+
 /* ── HUD ─────────────────────────────────────────────── */
 .hud {
   display: grid;
@@ -293,6 +312,7 @@ canvas { display: block; width: 100%; height: 100%; }
 .board.is-tiny #menu-screen .screen-crown,
 .board.is-tiny #menu-screen .field-label,
 .board.is-tiny .tagline { display: none; }
+.board.is-tiny .ig-link { padding: 2px 8px; }
 
 /* ── D-PAD (samo touch uređaji) ──────────────────────── */
 .dpad {

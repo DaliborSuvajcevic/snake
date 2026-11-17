@@ -1,6 +1,6 @@
 // Snake · The Golden Circle — service worker
 // Povećaj verziju kad menjaš fajlove da bi se keš osvežio.
-const CACHE = "gc-snake-v4";
+const CACHE = "gc-snake-v5";
 const ASSETS = [
   "./",
   "index.html",
