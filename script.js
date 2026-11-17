@@ -27,9 +27,9 @@
   const DEATH_DELAY = 950;        // ms animacije pre ekrana "kraj igre"
 
   const SPEEDS = {
-    easy:   { label: "Easy",   tick: 150 },
-    normal: { label: "Normal", tick: 100 },
-    hard:   { label: "Hard",   tick: 67 },
+    easy:   { label: "Easy",   tick: 150, min: 92 },
+    normal: { label: "Normal", tick: 100, min: 64 },
+    hard:   { label: "Hard",   tick: 67,  min: 48 },
   };
 
   const THEMES = {
@@ -61,6 +61,19 @@
     { id: "all_themes",  name: "Kolekcionar",     desc: "Isprobaj sve 3 teme" },
     { id: "daily_done",  name: "Dnevni izazov",   desc: "Završi Daily izazov" },
   ];
+
+  // Postepeno ubrzanje: svaki pojedeni krug skraćuje korak za 1.6%,
+  // do minimuma za tu brzinu (Easy oko 30, Normal i Hard oko 28 krugova).
+  const RAMP = 0.984;
+  function currentTick() {
+    const sp = SPEEDS[runSpeed];
+    return Math.max(sp.min, sp.tick * Math.pow(RAMP, eaten));
+  }
+  // 0..1 koliko je ubrzanje odmaklo
+  function rampProgress() {
+    const sp = SPEEDS[runSpeed];
+    return (sp.tick - currentTick()) / (sp.tick - sp.min);
+  }
 
   const DIRS = {
     up: { x: 0, y: -1 }, down: { x: 0, y: 1 },
@@ -102,7 +115,7 @@
   let state = "menu";
   let snake = [], prevSnake = [], dir = DIRS.right, dirQueue = [], grow = 0;
   let food = null, bonus = null, nextBonusAt = 0;
-  let score = 0, combo = 0, lastEatAt = -Infinity;
+  let score = 0, combo = 0, lastEatAt = -Infinity, eaten = 0;
   let gameTime = 0, tickAcc = 0, countdown = 0, lastCountNum = 0;
   let deathTimer = 0, shake = 0;
   let isDaily = false, rng = Math.random, runSpeed = speedKey;
@@ -185,15 +198,18 @@
   }
 
   // ---------- MUZIKA (generisana kodom, posebna za svaku temu) ----------
-  // Bez audio fajlova i bez autorskih prava. Sekvencer u šesnaestinama,
-  // petlja od 4 takta (64 koraka). Tempo raste sa brzinom igre.
+  // Forma od 32 takta (8 fraza po 4 takta), sa smirenim delom u sredini.
+  // Melodija se generiše nova za svaku frazu, pa se petlja ne ponavlja doslovno.
+  // Slojevi ulaze kako igra odmiče: pad -> bas -> bubanj -> arpeđo -> melodija.
   const Music = (() => {
     const BASE_VOL = 0.3;
     const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
     let out = null, bus = null, filter = null, delayIn = null, noise = null;
     let timer = null, step = 0, nextTime = 0;
     let enabled = store.get("gc_music", true) !== false;
-    let cur = { key: "", level: -1, muffled: null, tempo: 1 };
+    let cur = { key: "", level: -1, muffled: null, tempo: 1, layer: 0 };
+    let phraseCache = { id: -1, notes: [] };
+    let pendingStinger = 0;
 
     function build() {
       if (out || !audioCtx) return !!out;
@@ -201,14 +217,12 @@
       filter = audioCtx.createBiquadFilter(); filter.type = "lowpass"; filter.frequency.value = 18000;
       out.connect(filter); filter.connect(audioCtx.destination);
       bus = audioCtx.createGain(); bus.gain.value = 1; bus.connect(out);
-      // prostor: delay sa povratnom spregom
       delayIn = audioCtx.createGain(); delayIn.gain.value = 1;
       const delay = audioCtx.createDelay(1); delay.delayTime.value = 0.36;
       const fb = audioCtx.createGain(); fb.gain.value = 0.32;
       const wet = audioCtx.createGain(); wet.gain.value = 0.3;
       const tone = audioCtx.createBiquadFilter(); tone.type = "lowpass"; tone.frequency.value = 2600;
       delayIn.connect(delay); delay.connect(tone); tone.connect(fb); fb.connect(delay); tone.connect(wet); wet.connect(out);
-      // bela buka za perkusije
       noise = audioCtx.createBuffer(1, audioCtx.sampleRate, audioCtx.sampleRate);
       const d = noise.getChannelData(0);
       for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
@@ -238,9 +252,14 @@
       if (send) { const sg = audioCtx.createGain(); sg.gain.value = send; g.connect(sg); sg.connect(delayIn); }
       s.start(t, Math.random() * 0.5); s.stop(t + dec + 0.05);
     }
-    function note(t, midi, dur, v, type, cutoff = 0, attack = 0.005, send = 0) {
+    function note(t, midi, dur, v, type, cutoff = 0, attack = 0.005, send = 0, vib = 0) {
       const o = audioCtx.createOscillator(), g = audioCtx.createGain();
       o.type = type; o.frequency.value = mtof(midi);
+      if (vib) {
+        const l = audioCtx.createOscillator(), lg = audioCtx.createGain();
+        l.frequency.value = 5; lg.gain.value = mtof(midi) * vib;
+        l.connect(lg); lg.connect(o.frequency); l.start(t); l.stop(t + attack + dur + 0.05);
+      }
       env(g, t, attack, v, dur);
       let node = o;
       if (cutoff) {
@@ -252,73 +271,208 @@
       o.start(t); o.stop(t + attack + dur + 0.05);
     }
 
+    // ---- generator melodije ----
+    const RHYTHMS = [
+      [[0, 3], [3, 3], [6, 2], [8, 4], [12, 4]],
+      [[0, 2], [2, 2], [4, 4], [10, 2], [12, 4]],
+      [[0, 6], [6, 2], [8, 8]],
+      [[2, 2], [4, 2], [6, 2], [8, 6], [14, 2]],
+      [[0, 4], [4, 4], [8, 2], [10, 2], [12, 4]],
+      [[0, 8], [10, 2], [12, 4]],
+      [[4, 2], [6, 2], [8, 4], [13, 3]],
+      [[0, 2], [2, 2], [4, 2], [6, 2], [8, 2], [10, 2], [12, 4]],
+      [[0, 1], [1, 1], [2, 2], [6, 2], [8, 2], [11, 1], [12, 4]],
+      [[2, 2], [5, 1], [6, 2], [10, 2], [12, 2], [14, 2]],
+    ];
+    function buildPhrase(track, phraseId, prog) {
+      const r = seeded(phraseId * 7919 + track.seed);
+      const scale = track.scale;
+      const pool = [];
+      for (let o = -1; o <= 1; o++) scale.forEach((iv) => pool.push(track.tonic + iv + o * 12));
+      pool.sort((a, b) => a - b);
+      const lo = track.tonic - 2, hi = track.tonic + 14;
+      let idx = pool.indexOf(track.tonic + scale[Math.floor(r() * 3) * 2 % scale.length]);
+      if (idx < 0) idx = pool.indexOf(track.tonic);
+      const notes = [];
+      const motif = RHYTHMS[Math.floor(r() * RHYTHMS.length)];
+      for (let bar = 0; bar < 4; bar++) {
+        // ponovi motiv u taktovima 1 i 3, novi ritam u 2 i 4 (pitanje i odgovor)
+        const rh = bar % 2 === 0 ? motif : RHYTHMS[Math.floor(r() * RHYTHMS.length)];
+        if (bar === 3 && r() < 0.5) continue; // predah na kraju fraze
+        const chord = prog[bar][1];
+        rh.forEach(([st, du], k) => {
+          if (r() < 0.12 && k > 0) return;
+          const strong = st % 8 === 0;
+          if (strong) {
+            // na jakom delu takta ciljaj ton akorda
+            let best = idx, bd = 99;
+            pool.forEach((m, i) => {
+              if (chord.some((c) => (m - c) % 12 === 0) && Math.abs(i - idx) < bd) { bd = Math.abs(i - idx); best = i; }
+            });
+            idx = best;
+          } else {
+            const mv = [-2, -1, -1, 1, 1, 2, 0][Math.floor(r() * 7)];
+            idx = Math.max(0, Math.min(pool.length - 1, idx + mv));
+          }
+          let m = pool[idx];
+          while (m > hi) m -= 12;
+          while (m < lo) m += 12;
+          notes.push({ step: bar * 16 + st, midi: m, dur: du });
+        });
+      }
+      return notes;
+    }
+
     // ---- tri teme ----
+    // forma: indeks sekcije 0-7 unutar 32 takta; 4 = smiren deo (bez bubnja i basa)
+    const FORM = ["A", "A", "B", "B", "break", "A", "B", "B"];
+
     const TRACKS = {
-      // GOLD: dark minimal, D-mol, dubok bas i zlatni arpeđo
+      // GOLD: tamni, ali pokretan minimal groove, D-mol
       gold: {
-        bpm: 92, swing: 0,
-        bars: [[38, [62, 65, 69]], [34, [58, 62, 65]], [31, [55, 58, 62]], [33, [57, 61, 64]]],
-        play(s, t, spb) {
-          const [root, ch] = this.bars[Math.floor(s / 16) % 4];
-          const b = s % 16;
-          if (b === 0 || b === 8) kick(t, 0.9);
-          if (b === 7) kick(t, 0.45);
-          if (b % 4 === 2) hiss(t, 0.12, 0.05, "highpass", 7500);
-          if (b === 4 || b === 12) hiss(t, 0.1, 0.16, "bandpass", 1900, 0.7, 0.25);
-          if (b === 0) note(t, root, spb * 5, 0.32, "sawtooth", 420);
-          if (b === 6) note(t, root + 12, spb * 1.5, 0.22, "sawtooth", 520);
-          if (b === 10) note(t, root, spb * 4, 0.3, "sawtooth", 420);
-          if ([0, 3, 6, 9, 12].includes(b)) {
-            const n = ch[[0, 1, 2, 1, 2][[0, 3, 6, 9, 12].indexOf(b)]] + 12;
-            note(t, n, spb * 2.2, 0.07, "triangle", 0, 0.004, 0.55);
-          }
-          if (b === 0) ch.forEach((m) => note(t, m, spb * 15, 0.035, "sine", 0, spb * 4));
+        bpm: 114, swing: 0, seed: 11, tonic: 74, scale: [0, 2, 3, 5, 7, 8, 10],
+        A: [[38, [62, 65, 69]], [34, [58, 62, 65]], [31, [55, 58, 62]], [33, [57, 61, 64]]],
+        B: [[34, [58, 62, 65]], [36, [60, 64, 67]], [38, [62, 65, 69]], [33, [57, 61, 64]]],
+        drums(b, bar, fill, L) {
+          return (t) => {
+            if (b % 4 === 0) kick(t, b === 0 ? 0.95 : 0.8);
+            if (b === 4 || b === 12) hiss(t, 0.16, 0.14, "bandpass", 1700, 0.6, 0.2);
+            if (b % 4 === 2) hiss(t, 0.11, 0.11, "highpass", 7000);
+            if (L >= 4 && b % 2 === 1) hiss(t, 0.04, 0.03, "highpass", 9500);
+            if (fill && b >= 12) hiss(t, 0.06 + (b - 12) * 0.03, 0.08, "bandpass", 2300, 0.7);
+          };
         },
+        bass(b, root, sec) {
+          // bas na "i" posle svake dobe, oktava na kraju takta
+          if (b % 4 === 2) return (t, spb) => note(t, root + (b === 14 && sec === "B" ? 7 : 0), spb * 1.4, 0.3, "sawtooth", 650);
+          if (b === 15) return (t, spb) => note(t, root + 12, spb * 0.8, 0.2, "sawtooth", 800);
+          return null;
+        },
+        pad(b, ch) {
+          return b === 0 ? (t, spb) => ch.forEach((m) => note(t, m, spb * 14, 0.03, "sine", 0, spb * 2)) : null;
+        },
+        arp(b, ch, sec) {
+          const seq = sec === "B" ? [0, 1, 2, 3, 2, 1, 0, 1] : [0, 2, 1, 2, 0, 2, 1, 3];
+          if (b % 2 !== 0) return null;
+          const i = seq[b / 2];
+          const m = i === 3 ? ch[0] + 12 : ch[i];
+          return (t, spb) => note(t, m + 12, spb * 1.2, 0.06, "square", 1800, 0.003, 0.4);
+        },
+        lead: { type: "sawtooth", cutoff: 2400, vol: 0.06, send: 0.4, vib: 0, len: 0.8 },
       },
-      // CREAM: toplo i svetlo, F-dur, meki električni klavir
+      // CREAM: svetao, veseo groove, F-dur
       cream: {
-        bpm: 84, swing: 0,
-        bars: [[41, [65, 69, 72, 76]], [45, [69, 72, 76, 79]], [38, [62, 65, 69, 72]], [34, [58, 62, 65, 69]]],
-        melody: [[2, 81], [5, 79], [11, 76], [14, 74], [18, 72], [27, 74], [34, 77], [37, 76], [43, 72], [50, 74], [53, 70], [59, 69]],
-        play(s, t, spb) {
-          const [root, ch] = this.bars[Math.floor(s / 16) % 4];
-          const b = s % 16;
-          if (b === 0 || b === 10) kick(t, 0.38);
-          if (b % 2 === 0) hiss(t, b % 4 === 2 ? 0.06 : 0.035, 0.07, "highpass", 6000);
-          if (b === 4 || b === 12) hiss(t, 0.07, 0.06, "bandpass", 3200, 1.2);
-          if (b === 0) note(t, root, spb * 7, 0.32, "sine");
-          if (b === 8) note(t, root + 7, spb * 5, 0.26, "sine");
-          if (b === 14) note(t, root + 12, spb * 2, 0.18, "sine");
-          if (b === 0 || b === 6 || b === 10) {
-            ch.forEach((m) => note(t, m, spb * (b === 0 ? 5 : 3), 0.045, "triangle", 2200, 0.01, 0.2));
-          }
-          const mel = this.melody.find((x) => x[0] === s % 64);
-          if (mel) note(t, mel[1], spb * 3, 0.07, "sine", 0, 0.01, 0.5);
+        bpm: 108, swing: 0, seed: 23, tonic: 77, scale: [0, 2, 4, 5, 7, 9, 11],
+        A: [[41, [65, 69, 72, 76]], [45, [69, 72, 76, 79]], [38, [62, 65, 69, 72]], [34, [58, 62, 65, 69]]],
+        B: [[43, [67, 70, 74, 77]], [36, [64, 67, 70, 72]], [41, [65, 69, 72, 76]], [38, [62, 65, 69, 72]]],
+        drums(b, bar, fill, L) {
+          return (t) => {
+            if (b === 0 || b === 8 || b === 10) kick(t, b === 10 ? 0.45 : 0.7);
+            if (b === 4 || b === 12) hiss(t, 0.14, 0.12, "bandpass", 2000, 0.7, 0.15);
+            hiss(t, b % 2 === 0 ? 0.05 : 0.025, 0.05, "highpass", 6500);
+            if (L >= 4 && b % 4 === 2) hiss(t, 0.07, 0.18, "highpass", 5000);
+            if (fill && b >= 13) hiss(t, 0.1, 0.08, "bandpass", 2400, 0.7);
+          };
         },
+        bass(b, root) {
+          const pat = { 0: [0, 2], 3: [0, 1], 6: [12, 1], 8: [7, 2], 11: [0, 1], 14: [10, 2] };
+          const p = pat[b];
+          return p ? (t, spb) => note(t, root + p[0], spb * p[1], 0.3, "triangle", 900) : null;
+        },
+        pad(b, ch) {
+          // kratki akordi na kontratempu
+          return b % 4 === 2 ? (t, spb) => ch.forEach((m) => note(t, m, spb * 0.9, 0.04, "triangle", 2600, 0.004, 0.15)) : null;
+        },
+        arp(b, ch) {
+          if (b % 2 !== 0) return null;
+          const i = [0, 1, 2, 3, 2, 1, 2, 3][b / 2];
+          return (t, spb) => note(t, ch[i] + 12, spb * 0.9, 0.04, "sine", 0, 0.003, 0.35);
+        },
+        lead: { type: "triangle", cutoff: 0, vol: 0.08, send: 0.4, vib: 0.003, len: 0.75 },
       },
-      // NOIR: noir jazz, C-mol, četvrtinski bas, metlice i vibrafon, swing
+      // NOIR: brzi noir swing, C-mol
       noir: {
-        bpm: 76, swing: 0.32,
-        bars: [[36, [63, 67, 70, 74]], [32, [60, 63, 66, 68]], [29, [60, 63, 65, 68]], [31, [59, 62, 65, 68]]],
-        walk: [[36, 39, 43, 31], [32, 36, 39, 28], [29, 32, 36, 30], [31, 35, 38, 35]],
-        play(s, t, spb) {
-          const bar = Math.floor(s / 16) % 4;
-          const ch = this.bars[bar][1];
-          const b = s % 16;
-          if (b % 4 === 0) note(t, this.walk[bar][b / 4], spb * 3.4, 0.36, "triangle", 900, 0.01);
-          if (b === 0 || b === 4 || b === 8 || b === 12 || b === 6 || b === 14) {
-            hiss(t, b % 4 === 0 ? 0.07 : 0.045, 0.16, "highpass", 8000, 0.6);
-          }
-          if (b === 4 || b === 12) hiss(t, 0.09, 0.32, "bandpass", 1300, 0.5, 0.2);
-          if (b === 0 && bar % 2 === 0) kick(t, 0.35);
-          if (b === 2 || b === 10) {
-            const pick = b === 2 ? [ch[1], ch[3]] : [ch[0], ch[2]];
-            pick.forEach((m) => note(t, m + 12, spb * 6, 0.05, "sine", 0, 0.004, 0.45));
-          }
-          if (b === 7 && bar === 3) note(t, ch[3] + 12, spb * 3, 0.06, "sine", 0, 0.004, 0.6);
+        bpm: 100, swing: 0.34, seed: 37, tonic: 72, scale: [0, 2, 3, 5, 7, 8, 10],
+        A: [[36, [63, 67, 70, 74]], [32, [60, 63, 66, 68]], [29, [60, 63, 65, 68]], [31, [59, 62, 65, 68]]],
+        B: [[29, [60, 63, 65, 68]], [34, [62, 65, 68, 70]], [39, [62, 63, 67, 70]], [31, [59, 62, 65, 68]]],
+        drums(b, bar, fill, L) {
+          return (t) => {
+            // ride: ding, ding-a ding
+            if ([0, 4, 6, 8, 12, 14].includes(b)) hiss(t, b % 4 === 0 ? 0.08 : 0.055, 0.2, "highpass", 7500, 0.6);
+            if (b === 4 || b === 12) hiss(t, 0.05, 0.06, "highpass", 9000); // hi-hat nogom
+            if (b === 4 || b === 12) hiss(t, 0.1, 0.25, "bandpass", 1300, 0.5, 0.15);
+            if (L >= 3 && (b === 6 || b === 14) && bar % 2) hiss(t, 0.05, 0.08, "bandpass", 1500, 0.6); // ghost
+            if (b === 0 || (b === 10 && bar % 2)) kick(t, 0.4);
+            if (fill && (b === 10 || b === 13 || b === 14)) hiss(t, 0.09, 0.15, "bandpass", 1500, 0.5);
+          };
         },
+        bass(b, root, sec, nextRoot) {
+          if (b % 4 !== 0) return null;
+          const q = b / 4;
+          return (t, spb) => {
+            const approach = nextRoot + (nextRoot > root ? -1 : 1);
+            const line = sec === "B" ? [root, root + 7, root + 15, approach] : [root, root + 3, root + 7, approach];
+            note(t, line[q], spb * 3.2, 0.38, "triangle", 1000, 0.008);
+          };
+        },
+        pad(b, ch) {
+          // klavirski "comping" na kontratempu
+          if (b !== 6 && b !== 14 && b !== 3) return null;
+          const pick = b === 3 ? [ch[1], ch[3]] : [ch[0], ch[2], ch[3]];
+          return (t, spb) => pick.forEach((m) => note(t, m, spb * 1.4, 0.045, "triangle", 2000, 0.004, 0.2));
+        },
+        arp(b, ch) {
+          if (b !== 2 && b !== 10) return null;
+          return (t, spb) => [ch[1], ch[3]].forEach((m) => note(t, m + 12, spb * 4, 0.04, "sine", 0, 0.004, 0.45));
+        },
+        lead: { type: "sine", cutoff: 0, vol: 0.085, send: 0.5, vib: 0.006, len: 0.8 },
       },
     };
+
+    // nivo intenziteta (0 meni ... 4 pun aranžman) određuje koji slojevi sviraju
+    function playStep(track, s, t, spb) {
+      const bar = Math.floor(s / 16), b = s % 16;
+      const phrase = Math.floor(bar / 4), barIn = bar % 4;
+      const sec = FORM[phrase % 8];
+      const prog = sec === "B" ? track.B : track.A;
+      const [root, ch] = prog[barIn];
+      const nextRoot = prog[(barIn + 1) % 4][0];
+      const L = cur.layer;
+      const isBreak = sec === "break";
+      const fill = barIn === 3 && FORM[(phrase + 1) % 8] !== FORM[phrase % 8];
+
+      const run = (fn) => { if (fn) fn(t, spb); };
+      // L0 meni, L1 početak igre, L2 od 4 kruga, L3 od 10, L4 od 18
+      run(track.pad(b, ch, sec));
+      if (!isBreak) {
+        run(track.bass(b, root, sec, nextRoot));
+        run(track.drums(b, bar, fill, L));
+      } else if (b % 4 === 2) {
+        hiss(t, 0.04, 0.05, "highpass", 8000); // u smirenom delu samo puls
+      }
+      if (L >= 2 || isBreak) run(track.arp(b, ch, sec));
+      // melodija od nivoa 3; u meniju i smirenom delu povremeno
+      const melodyOn = L >= 3 || isBreak || (L <= 1 && phrase % 2 === 1);
+      if (melodyOn) {
+        const id = phrase + 1000 * cur.keyIndex;
+        if (phraseCache.id !== id) phraseCache = { id, notes: buildPhrase(track, phrase, prog) };
+        const lead = track.lead;
+        phraseCache.notes.forEach((n) => {
+          if (n.step === barIn * 16 + b) {
+            note(t, n.midi, spb * n.dur * lead.len, lead.vol, lead.type, lead.cutoff, 0.008, lead.send, lead.vib);
+            // na punom aranžmanu melodija se udvaja oktavu niže
+            if (L >= 4) note(t, n.midi - 12, spb * n.dur * lead.len, lead.vol * 0.5, lead.type, lead.cutoff, 0.008, 0);
+          }
+        });
+      }
+      // kratki uzlazni akcent na combo
+      if (pendingStinger && b % 2 === 0) {
+        const n = pendingStinger;
+        pendingStinger = 0;
+        const tones = [ch[0], ch[1], ch[2], ch[0] + 12].slice(0, n >= 5 ? 4 : 3);
+        tones.forEach((m, i) => note(t + i * spb * 0.5, m + 12, spb * 1.5, 0.06, "triangle", 0, 0.003, 0.5));
+      }
+    }
 
     function schedule() {
       if (!audioCtx || !out) return;
@@ -328,9 +482,9 @@
       if (nextTime < audioCtx.currentTime) nextTime = audioCtx.currentTime + 0.05;
       while (nextTime < audioCtx.currentTime + 0.18) {
         const sw = track.swing && step % 4 === 2 ? spb * track.swing : 0;
-        try { track.play(step, nextTime + sw, spb); } catch (e) {}
+        try { playStep(track, step, nextTime + sw, spb); } catch (e) {}
         nextTime += spb;
-        step = (step + 1) % 64;
+        step = (step + 1) % (64 * 8 * 4); // 4 prolaza kroz formu, posle kreće ispočetka
       }
     }
 
@@ -345,7 +499,8 @@
     }
 
     // poziva se svaki frejm; menja nešto samo kad se stanje promeni
-    function sync(gameState, theme, speed, hidden) {
+    // layer: 0 meni, 1-4 u igri; tempo: množilac tempa
+    function sync(gameState, theme, layer, tempo, hidden) {
       if (!audioCtx || audioCtx.state !== "running") return;
       if (!build()) return;
       const now = audioCtx.currentTime;
@@ -353,12 +508,15 @@
         : gameState === "playing" || gameState === "countdown" ? 1
         : gameState === "menu" ? 0.6 : 0.4;
       const muffled = gameState === "paused" || gameState === "over" || gameState === "dying";
-      const tempo = gameState === "menu" ? 1 : ({ easy: 1, normal: 1.08, hard: 1.16 })[speed] || 1;
 
       if (theme !== cur.key) {
-        cur.key = theme; step = 0; nextTime = now + 0.12;
-        bus.gain.setTargetAtTime(({ gold: 1.25, cream: 1.9, noir: 2.1 })[theme] || 1, now, 0.1);
+        cur.key = theme;
+        cur.keyIndex = Object.keys(TRACKS).indexOf(theme);
+        step = 0; phraseCache.id = -1; nextTime = now + 0.12;
+        bus.gain.setTargetAtTime(({ gold: 1, cream: 1.45, noir: 1.75 })[theme] || 1, now, 0.1);
       }
+      if (gameState === "menu" && cur.layer !== 0) step = 0; // nova igra kreće od početka forme
+      cur.layer = layer;
       cur.tempo = tempo;
       if (level !== cur.level) {
         out.gain.cancelScheduledValues(now);
@@ -375,6 +533,8 @@
 
     return {
       sync,
+      restart() { step = 0; phraseCache.id = -1; },
+      stinger(n) { pendingStinger = n; },
       get enabled() { return enabled; },
       toggle() { enabled = !enabled; store.set("gc_music", enabled); },
     };
@@ -434,10 +594,11 @@
     prevSnake = snake.map((p) => ({ ...p }));
     dir = DIRS.right; dirQueue = []; grow = 0;
     food = null; bonus = null;
-    score = 0; combo = 0; lastEatAt = -Infinity;
+    score = 0; combo = 0; lastEatAt = -Infinity; eaten = 0;
     gameTime = 0; tickAcc = 0;
     particles = []; floats = []; shake = 0;
     lastSavedIndex = -1;
+    Music.restart();
     spawnFood();
     scheduleBonus();
     updateHud();
@@ -487,6 +648,7 @@
   }
 
   function eat(points, isBonus, at) {
+    eaten++;
     combo = gameTime - lastEatAt <= COMBO_WINDOW ? combo + 1 : 1;
     lastEatAt = gameTime;
     const mult = combo >= 5 ? 3 : combo >= 3 ? 2 : 1;
@@ -505,6 +667,7 @@
     } else {
       spawnFood();
       if (combo >= 3) {
+        if (combo === 3 || combo === 5) Music.stinger(combo);
         sound("combo");
         burst(cx, cy, theme.food, 30, 6);
         floats.push(makeFloat(cx, cy, `COMBO x${combo}`, theme.food));
@@ -627,7 +790,7 @@
     if (state === "playing") {
       gameTime += dt;
       tickAcc += dt;
-      const tick = SPEEDS[runSpeed].tick;
+      const tick = currentTick();
       let guard = 0;
       while (tickAcc >= tick && state === "playing" && guard++ < 5) {
         tickAcc -= tick;
@@ -751,7 +914,7 @@
 
   function drawSnake() {
     if (!snake.length) return;
-    const tick = SPEEDS[runSpeed].tick;
+    const tick = currentTick();
     const a = state === "playing" ? Math.min(1, tickAcc / tick) : 1;
     const n = snake.length;
     const pts = snake.map((p, i) => {
@@ -838,6 +1001,19 @@
     ctx.restore();
   }
 
+  // ---------- MUZIKA PRATI IGRU ----------
+  function musicLayer() {
+    if (state === "menu") return 0;
+    let L = eaten >= 18 ? 4 : eaten >= 10 ? 3 : eaten >= 4 ? 2 : 1;
+    if (combo >= 3) L = Math.min(4, L + 1);
+    return L;
+  }
+  function musicTempo() {
+    if (state === "menu") return 1;
+    const base = ({ easy: 1, normal: 1.06, hard: 1.12 })[runSpeed] || 1;
+    return base * (1 + 0.1 * rampProgress());
+  }
+
   // ---------- GLAVNA PETLJA ----------
   let lastTs = 0;
   function frame(ts) {
@@ -845,7 +1021,7 @@
     lastTs = ts;
     update(dt);
     render();
-    Music.sync(state, themeKey, runSpeed, document.hidden);
+    Music.sync(state, themeKey, musicLayer(), musicTempo(), document.hidden);
     requestAnimationFrame(frame);
   }
 
@@ -1108,7 +1284,7 @@
   let lastTouchEnd = 0;
   document.addEventListener("touchend", (e) => {
     const now = Date.now();
-    if (now - lastTouchEnd <= 320 && !e.target.closest(".panel")) e.preventDefault();
+    if (now - lastTouchEnd <= 320 && !e.target.closest("button, a, .panel")) e.preventDefault();
     lastTouchEnd = now;
   }, { passive: false });
   document.addEventListener("dblclick", (e) => e.preventDefault(), { passive: false });
