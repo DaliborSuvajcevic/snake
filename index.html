@@ -2,107 +2,134 @@
 <html lang="sr-Latn">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Snake – Golden Circle</title>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;800&display=swap">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>Snake · The Golden Circle</title>
+  <meta name="description" content="Snake by The Golden Circle. Igraj u browseru ili instaliraj kao aplikaciju.">
+  <meta name="theme-color" content="#111111">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Snake">
+  <meta name="format-detection" content="telephone=no">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="style.css">
 </head>
-<body class="golden-theme">
-  <div id="app" class="noselect">
+<body>
+  <div id="app">
+    <main class="main">
 
-    <!-- Naslov -->
-    <header id="author">
-      <h1>SNAKE</h1>
-      <span>by Golden Circle</span>
-    </header>
+      <header class="topbar">
+        <div class="brand">
+          <img src="assets/crown.png" alt="The Golden Circle" class="brand-crown" width="335" height="293">
+          <div class="brand-text">
+            <h1>SNAKE</h1>
+            <span>THE GOLDEN CIRCLE</span>
+          </div>
+        </div>
+        <div class="top-actions">
+          <button class="icon-btn" id="sound-btn" aria-label="Zvuk"></button>
+          <button class="icon-btn only-compact" id="panel-btn" aria-label="Rang lista i dostignuća">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/></svg>
+          </button>
+        </div>
+      </header>
 
-    <!-- Glavni layout -->
-    <div class="layout">
+      <section class="hud">
+        <div class="stat"><span class="stat-label">SCORE</span><span class="stat-value" id="score">0</span></div>
+        <div class="stat"><span class="stat-label">BEST</span><span class="stat-value" id="best">0</span></div>
+        <div class="stat stat-combo" id="combo-box"><span class="stat-label">COMBO</span><span class="stat-value" id="combo">x1</span></div>
+        <button class="icon-btn" id="pause-btn" aria-label="Pauza" disabled>
+          <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1.2"/><rect x="14" y="5" width="4" height="14" rx="1.2"/></svg>
+        </button>
+      </section>
 
-      <!-- Leva strana: igra -->
-      <div class="game-area">
-        <!-- FIX: dodat id="game-wrapper" koji je bio referenciran u script.js -->
-        <div id="game-wrapper">
-          <canvas id="game" width="400" height="400"></canvas>
-          <div id="start-hint">
-            <div class="hint-content">
-              <span class="hint-title">🐍 SNAKE</span>
-              <span class="hint-keys"><i class="fas fa-arrow-up"></i><i class="fas fa-arrow-down"></i><i class="fas fa-arrow-left"></i><i class="fas fa-arrow-right"></i> &nbsp;ili&nbsp; WASD</span>
-              <span class="hint-sub">SPACE / P — pauza</span>
-              <span class="hint-cta">Pritisni START</span>
+      <section class="stage" id="stage">
+        <div class="board" id="board">
+          <canvas id="game"></canvas>
+
+          <!-- MENI -->
+          <div class="screen" id="menu-screen">
+            <img src="assets/crown.png" alt="" class="screen-crown" width="335" height="293">
+            <h2 class="screen-title">SNAKE</h2>
+            <div class="field">
+              <span class="field-label">BRZINA</span>
+              <div class="seg" id="speed-seg">
+                <button data-speed="easy">Easy</button>
+                <button data-speed="normal">Normal</button>
+                <button data-speed="hard">Hard</button>
+              </div>
+            </div>
+            <div class="field">
+              <span class="field-label">TEMA</span>
+              <div class="seg" id="theme-seg">
+                <button data-theme="gold">Gold</button>
+                <button data-theme="cream">Cream</button>
+                <button data-theme="noir">Noir</button>
+              </div>
+            </div>
+            <button class="btn btn-primary" id="start-btn">START</button>
+            <button class="btn btn-ghost" id="daily-btn">DAILY IZAZOV</button>
+            <p class="hint only-touch">Prevuci prstom po tabli ili koristi strelice ispod</p>
+            <p class="hint only-pointer">Strelice ili WASD · SPACE pauza</p>
+          </div>
+
+          <!-- PAUZA -->
+          <div class="screen hidden" id="pause-screen">
+            <h2 class="screen-title">PAUZA</h2>
+            <button class="btn btn-primary" id="resume-btn">NASTAVI</button>
+            <button class="btn btn-ghost" id="pause-menu-btn">MENI</button>
+          </div>
+
+          <!-- KRAJ IGRE -->
+          <div class="screen hidden" id="over-screen">
+            <span class="field-label" id="over-mode">EASY</span>
+            <h2 class="screen-title">KRAJ IGRE</h2>
+            <span class="over-score" id="over-score">0</span>
+            <span class="badge hidden" id="record-badge">NOVI REKORD</span>
+            <p class="tagline">Disciplina pre motivacije.</p>
+            <button class="btn btn-primary" id="again-btn">IGRAJ PONOVO</button>
+            <div class="btn-row">
+              <button class="btn btn-ghost" id="share-btn">PODELI</button>
+              <button class="btn btn-ghost" id="over-menu-btn">MENI</button>
             </div>
           </div>
         </div>
+      </section>
 
-        <!-- Touch kontrole za mobilne uređaje -->
-        <div id="touch-controls">
-          <button class="control-btn" data-dir="up"><i class="fas fa-arrow-up"></i></button>
-          <div class="middle-row">
-            <button class="control-btn" data-dir="left"><i class="fas fa-arrow-left"></i></button>
-            <button class="control-btn" data-dir="right"><i class="fas fa-arrow-right"></i></button>
-          </div>
-          <button class="control-btn" data-dir="down"><i class="fas fa-arrow-down"></i></button>
-        </div>
+      <nav class="dpad" id="dpad" aria-label="Kontrole">
+        <button class="pad pad-up" data-dir="up" aria-label="Gore"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button>
+        <button class="pad pad-left" data-dir="left" aria-label="Levo"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+        <button class="pad pad-down" data-dir="down" aria-label="Dole"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+        <button class="pad pad-right" data-dir="right" aria-label="Desno"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+      </nav>
+    </main>
 
-        <!-- Izbor boja / tema -->
-        <div id="snake-colors">
-          <button data-theme="golden" class="active">Golden</button>
-          <button data-theme="neon">Neon</button>
-          <button data-theme="retro">Retro</button>
-          <button data-theme="matrix">Matrix</button>
-        </div>
+    <div class="scrim" id="scrim"></div>
+    <aside class="panel" id="panel">
+      <div class="panel-head only-compact">
+        <span class="panel-grab"></span>
+        <button class="icon-btn" id="panel-close" aria-label="Zatvori">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
       </div>
-
-      <!-- Desna strana: UI + leaderboard -->
-      <div class="sidebar">
-        <!-- UI Score + kontrole -->
-        <div id="ui">
-          <h2>SCORE</h2>
-          <span id="score">00</span>
-        <div id="controls">
-  <button id="start"><i class="fas fa-play"></i> START</button>
-  <button id="replay"><i class="fas fa-redo"></i> RESTART</button>
-  <button id="daily-btn"><i class="fas fa-calendar-day"></i> DAILY</button>
-  <button id="mute-btn"><i class="fas fa-volume-up"></i> SOUND</button>
-</div>
-          <!-- FIX: Difficulty selector dodat -->
-          <div id="difficulty">
-            <span>SPEED</span>
-            <div id="diff-buttons">
-              <button data-delay="8" class="diff-btn active">Easy</button>
-              <button data-delay="5" class="diff-btn">Normal</button>
-              <button data-delay="3" class="diff-btn">Hard</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Leaderboard -->
-        <div id="leaderboard">
-          <h2>TOP</h2>
-          <ol id="scores-list"></ol>
-        </div>
-
-        <!-- Achievements -->
-        <div id="achievements-panel">
-          <h2>ACHIEVEMENTS</h2>
-          <ul id="achievements-list"></ul>
-        </div>
-      </div>
-    </div>
-
-    <!-- Modal Game Over -->
-    <div id="game-over-modal" class="modal hidden" role="dialog" aria-modal="true">
-      <div class="modal-content">
-        <h2>Game Over</h2>
-        <!-- FIX: p tag sada koristi innerHTML sa <br> umesto \n -->
-        <p id="final-score"></p>
-        <button id="close-modal">Play Again</button>
-      </div>
-    </div>
-
+      <section class="card">
+        <h2 id="lb-title">TOP 5 · EASY</h2>
+        <ol id="scores-list" class="scores"></ol>
+        <p class="daily-line" id="daily-line"></p>
+      </section>
+      <section class="card">
+        <h2 id="ach-title">DOSTIGNUĆA</h2>
+        <ul id="achievements-list" class="achievements"></ul>
+      </section>
+    </aside>
   </div>
 
+  <div id="toasts" aria-live="polite"></div>
   <script src="script.js"></script>
 </body>
 </html>
