@@ -74,7 +74,7 @@
   const ui = {
     stage: $("#stage"), board: $("#board"),
     score: $("#score"), best: $("#best"), combo: $("#combo"), comboBox: $("#combo-box"),
-    pauseBtn: $("#pause-btn"), soundBtn: $("#sound-btn"),
+    pauseBtn: $("#pause-btn"), soundBtn: $("#sound-btn"), musicBtn: $("#music-btn"),
     menu: $("#menu-screen"), pause: $("#pause-screen"), over: $("#over-screen"),
     startBtn: $("#start-btn"), dailyBtn: $("#daily-btn"),
     resumeBtn: $("#resume-btn"), pauseMenuBtn: $("#pause-menu-btn"),
@@ -183,6 +183,202 @@
       }
     } catch (e) {}
   }
+
+  // ---------- MUZIKA (generisana kodom, posebna za svaku temu) ----------
+  // Bez audio fajlova i bez autorskih prava. Sekvencer u šesnaestinama,
+  // petlja od 4 takta (64 koraka). Tempo raste sa brzinom igre.
+  const Music = (() => {
+    const BASE_VOL = 0.3;
+    const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
+    let out = null, bus = null, filter = null, delayIn = null, noise = null;
+    let timer = null, step = 0, nextTime = 0;
+    let enabled = store.get("gc_music", true) !== false;
+    let cur = { key: "", level: -1, muffled: null, tempo: 1 };
+
+    function build() {
+      if (out || !audioCtx) return !!out;
+      out = audioCtx.createGain(); out.gain.value = 0;
+      filter = audioCtx.createBiquadFilter(); filter.type = "lowpass"; filter.frequency.value = 18000;
+      out.connect(filter); filter.connect(audioCtx.destination);
+      bus = audioCtx.createGain(); bus.gain.value = 1; bus.connect(out);
+      // prostor: delay sa povratnom spregom
+      delayIn = audioCtx.createGain(); delayIn.gain.value = 1;
+      const delay = audioCtx.createDelay(1); delay.delayTime.value = 0.36;
+      const fb = audioCtx.createGain(); fb.gain.value = 0.32;
+      const wet = audioCtx.createGain(); wet.gain.value = 0.3;
+      const tone = audioCtx.createBiquadFilter(); tone.type = "lowpass"; tone.frequency.value = 2600;
+      delayIn.connect(delay); delay.connect(tone); tone.connect(fb); fb.connect(delay); tone.connect(wet); wet.connect(out);
+      // bela buka za perkusije
+      noise = audioCtx.createBuffer(1, audioCtx.sampleRate, audioCtx.sampleRate);
+      const d = noise.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      return true;
+    }
+
+    // ---- instrumenti ----
+    function env(g, t, a, peak, dec) {
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(peak, t + a);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + a + dec);
+    }
+    function kick(t, v) {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = "sine";
+      o.frequency.setValueAtTime(130, t);
+      o.frequency.exponentialRampToValueAtTime(42, t + 0.14);
+      env(g, t, 0.003, v, 0.28);
+      o.connect(g); g.connect(bus); o.start(t); o.stop(t + 0.32);
+    }
+    function hiss(t, v, dec, type, freq, q = 0.8, send = 0) {
+      const s = audioCtx.createBufferSource(); s.buffer = noise;
+      const f = audioCtx.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
+      const g = audioCtx.createGain();
+      env(g, t, 0.002, v, dec);
+      s.connect(f); f.connect(g); g.connect(bus);
+      if (send) { const sg = audioCtx.createGain(); sg.gain.value = send; g.connect(sg); sg.connect(delayIn); }
+      s.start(t, Math.random() * 0.5); s.stop(t + dec + 0.05);
+    }
+    function note(t, midi, dur, v, type, cutoff = 0, attack = 0.005, send = 0) {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type; o.frequency.value = mtof(midi);
+      env(g, t, attack, v, dur);
+      let node = o;
+      if (cutoff) {
+        const f = audioCtx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = cutoff;
+        o.connect(f); node = f;
+      }
+      node.connect(g); g.connect(bus);
+      if (send) { const sg = audioCtx.createGain(); sg.gain.value = send; g.connect(sg); sg.connect(delayIn); }
+      o.start(t); o.stop(t + attack + dur + 0.05);
+    }
+
+    // ---- tri teme ----
+    const TRACKS = {
+      // GOLD: dark minimal, D-mol, dubok bas i zlatni arpeđo
+      gold: {
+        bpm: 92, swing: 0,
+        bars: [[38, [62, 65, 69]], [34, [58, 62, 65]], [31, [55, 58, 62]], [33, [57, 61, 64]]],
+        play(s, t, spb) {
+          const [root, ch] = this.bars[Math.floor(s / 16) % 4];
+          const b = s % 16;
+          if (b === 0 || b === 8) kick(t, 0.9);
+          if (b === 7) kick(t, 0.45);
+          if (b % 4 === 2) hiss(t, 0.12, 0.05, "highpass", 7500);
+          if (b === 4 || b === 12) hiss(t, 0.1, 0.16, "bandpass", 1900, 0.7, 0.25);
+          if (b === 0) note(t, root, spb * 5, 0.32, "sawtooth", 420);
+          if (b === 6) note(t, root + 12, spb * 1.5, 0.22, "sawtooth", 520);
+          if (b === 10) note(t, root, spb * 4, 0.3, "sawtooth", 420);
+          if ([0, 3, 6, 9, 12].includes(b)) {
+            const n = ch[[0, 1, 2, 1, 2][[0, 3, 6, 9, 12].indexOf(b)]] + 12;
+            note(t, n, spb * 2.2, 0.07, "triangle", 0, 0.004, 0.55);
+          }
+          if (b === 0) ch.forEach((m) => note(t, m, spb * 15, 0.035, "sine", 0, spb * 4));
+        },
+      },
+      // CREAM: toplo i svetlo, F-dur, meki električni klavir
+      cream: {
+        bpm: 84, swing: 0,
+        bars: [[41, [65, 69, 72, 76]], [45, [69, 72, 76, 79]], [38, [62, 65, 69, 72]], [34, [58, 62, 65, 69]]],
+        melody: [[2, 81], [5, 79], [11, 76], [14, 74], [18, 72], [27, 74], [34, 77], [37, 76], [43, 72], [50, 74], [53, 70], [59, 69]],
+        play(s, t, spb) {
+          const [root, ch] = this.bars[Math.floor(s / 16) % 4];
+          const b = s % 16;
+          if (b === 0 || b === 10) kick(t, 0.38);
+          if (b % 2 === 0) hiss(t, b % 4 === 2 ? 0.06 : 0.035, 0.07, "highpass", 6000);
+          if (b === 4 || b === 12) hiss(t, 0.07, 0.06, "bandpass", 3200, 1.2);
+          if (b === 0) note(t, root, spb * 7, 0.32, "sine");
+          if (b === 8) note(t, root + 7, spb * 5, 0.26, "sine");
+          if (b === 14) note(t, root + 12, spb * 2, 0.18, "sine");
+          if (b === 0 || b === 6 || b === 10) {
+            ch.forEach((m) => note(t, m, spb * (b === 0 ? 5 : 3), 0.045, "triangle", 2200, 0.01, 0.2));
+          }
+          const mel = this.melody.find((x) => x[0] === s % 64);
+          if (mel) note(t, mel[1], spb * 3, 0.07, "sine", 0, 0.01, 0.5);
+        },
+      },
+      // NOIR: noir jazz, C-mol, četvrtinski bas, metlice i vibrafon, swing
+      noir: {
+        bpm: 76, swing: 0.32,
+        bars: [[36, [63, 67, 70, 74]], [32, [60, 63, 66, 68]], [29, [60, 63, 65, 68]], [31, [59, 62, 65, 68]]],
+        walk: [[36, 39, 43, 31], [32, 36, 39, 28], [29, 32, 36, 30], [31, 35, 38, 35]],
+        play(s, t, spb) {
+          const bar = Math.floor(s / 16) % 4;
+          const ch = this.bars[bar][1];
+          const b = s % 16;
+          if (b % 4 === 0) note(t, this.walk[bar][b / 4], spb * 3.4, 0.36, "triangle", 900, 0.01);
+          if (b === 0 || b === 4 || b === 8 || b === 12 || b === 6 || b === 14) {
+            hiss(t, b % 4 === 0 ? 0.07 : 0.045, 0.16, "highpass", 8000, 0.6);
+          }
+          if (b === 4 || b === 12) hiss(t, 0.09, 0.32, "bandpass", 1300, 0.5, 0.2);
+          if (b === 0 && bar % 2 === 0) kick(t, 0.35);
+          if (b === 2 || b === 10) {
+            const pick = b === 2 ? [ch[1], ch[3]] : [ch[0], ch[2]];
+            pick.forEach((m) => note(t, m + 12, spb * 6, 0.05, "sine", 0, 0.004, 0.45));
+          }
+          if (b === 7 && bar === 3) note(t, ch[3] + 12, spb * 3, 0.06, "sine", 0, 0.004, 0.6);
+        },
+      },
+    };
+
+    function schedule() {
+      if (!audioCtx || !out) return;
+      const track = TRACKS[cur.key];
+      if (!track) return;
+      const spb = 60 / (track.bpm * cur.tempo) / 4;
+      if (nextTime < audioCtx.currentTime) nextTime = audioCtx.currentTime + 0.05;
+      while (nextTime < audioCtx.currentTime + 0.18) {
+        const sw = track.swing && step % 4 === 2 ? spb * track.swing : 0;
+        try { track.play(step, nextTime + sw, spb); } catch (e) {}
+        nextTime += spb;
+        step = (step + 1) % 64;
+      }
+    }
+
+    function run(on) {
+      if (on && !timer) {
+        nextTime = audioCtx.currentTime + 0.08;
+        timer = setInterval(schedule, 25);
+      } else if (!on && timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+    }
+
+    // poziva se svaki frejm; menja nešto samo kad se stanje promeni
+    function sync(gameState, theme, speed, hidden) {
+      if (!audioCtx || audioCtx.state !== "running") return;
+      if (!build()) return;
+      const now = audioCtx.currentTime;
+      const level = !enabled || hidden ? 0
+        : gameState === "playing" || gameState === "countdown" ? 1
+        : gameState === "menu" ? 0.6 : 0.4;
+      const muffled = gameState === "paused" || gameState === "over" || gameState === "dying";
+      const tempo = gameState === "menu" ? 1 : ({ easy: 1, normal: 1.08, hard: 1.16 })[speed] || 1;
+
+      if (theme !== cur.key) {
+        cur.key = theme; step = 0; nextTime = now + 0.12;
+        bus.gain.setTargetAtTime(({ gold: 1.25, cream: 1.9, noir: 2.1 })[theme] || 1, now, 0.1);
+      }
+      cur.tempo = tempo;
+      if (level !== cur.level) {
+        out.gain.cancelScheduledValues(now);
+        out.gain.setTargetAtTime(level * BASE_VOL, now, 0.35);
+        cur.level = level;
+      }
+      if (muffled !== cur.muffled) {
+        filter.frequency.cancelScheduledValues(now);
+        filter.frequency.setTargetAtTime(muffled ? 650 : 18000, now, 0.25);
+        cur.muffled = muffled;
+      }
+      run(level > 0);
+    }
+
+    return {
+      sync,
+      get enabled() { return enabled; },
+      toggle() { enabled = !enabled; store.set("gc_music", enabled); },
+    };
+  })();
 
   // ---------- CANVAS VELIČINA ----------
   function fitBoard() {
@@ -649,6 +845,7 @@
     lastTs = ts;
     update(dt);
     render();
+    Music.sync(state, themeKey, runSpeed, document.hidden);
     requestAnimationFrame(frame);
   }
 
@@ -762,6 +959,13 @@
 
   const ICON_SOUND_ON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg>';
   const ICON_SOUND_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M17 9l5 6M22 9l-5 6"/></svg>';
+  const ICON_MUSIC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>';
+  const ICON_MUSIC_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/><path d="M3 3l18 18"/></svg>';
+  function updateMusicBtn() {
+    ui.musicBtn.innerHTML = Music.enabled ? ICON_MUSIC : ICON_MUSIC_OFF;
+    ui.musicBtn.classList.toggle("is-off", !Music.enabled);
+    ui.musicBtn.setAttribute("aria-label", Music.enabled ? "Isključi muziku" : "Uključi muziku");
+  }
   function updateSoundBtn() {
     ui.soundBtn.innerHTML = isMuted ? ICON_SOUND_OFF : ICON_SOUND_ON;
     ui.soundBtn.classList.toggle("is-off", isMuted);
@@ -815,6 +1019,7 @@
   tap(ui.overMenuBtn, toMenu);
   tap(ui.shareBtn, share);
   tap(ui.pauseBtn, () => (state === "paused" ? resumeGame() : pauseGame()));
+  tap(ui.musicBtn, () => { Music.toggle(); updateMusicBtn(); });
   tap(ui.soundBtn, () => {
     isMuted = !isMuted;
     store.set("isMuted", isMuted);
@@ -892,6 +1097,8 @@
     btn.addEventListener("contextmenu", (e) => e.preventDefault());
   });
 
+  ["pointerdown", "keydown"].forEach((ev) => window.addEventListener(ev, unlockAudio, { passive: true }));
+
   // ---------- BLOKADA ZUMIRANJA ----------
   // 1) viewport meta + CSS touch-action, 2) iOS Safari pinch (gesture*),
   // 3) brzi dupli tap.
@@ -922,6 +1129,7 @@
   setSpeed(speedKey);
   setTheme(themeKey);
   updateSoundBtn();
+  updateMusicBtn();
   updateDailyBtn();
   renderAchievements();
   updateLeaderboard();

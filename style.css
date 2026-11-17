@@ -146,7 +146,7 @@ a.icon-btn { text-decoration: none; }
 /* ── HUD ─────────────────────────────────────────────── */
 .hud {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr auto;
+  grid-template-columns: 1fr 1fr 1fr auto auto;
   gap: 8px;
 }
 .hud .icon-btn { height: auto; min-height: 48px; width: 48px; }
