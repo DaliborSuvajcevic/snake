@@ -1,6 +1,6 @@
 // Snake · The Golden Circle — service worker
 // Povećaj verziju kad menjaš fajlove da bi se keš osvežio.
-const CACHE = "gc-snake-v8";
+const CACHE = "gc-snake-v9";
 const ASSETS = [
   "./",
   "index.html",
@@ -12,7 +12,7 @@ const ASSETS = [
   "assets/icon-512.png",
   "assets/icon-maskable-512.png",
   "assets/apple-touch-icon.png",
-  "assets/og-image.png",
+  "assets/og-snake.jpg",
 ];
 
 self.addEventListener("install", (e) => {
