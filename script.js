@@ -121,6 +121,7 @@
   let isDaily = false, rng = Math.random, runSpeed = speedKey;
   let particles = [], floats = [];
   let lastSavedIndex = -1;
+  let maxCombo = 0, lastRunLength = 0, lastRunRecord = false;
 
   // canvas metrika
   let cssSize = 300, dpr = 1, unit = 15; // unit = px po ćeliji (device px)
@@ -598,6 +599,7 @@
     gameTime = 0; tickAcc = 0;
     particles = []; floats = []; shake = 0;
     lastSavedIndex = -1;
+    maxCombo = 0; lastRunLength = 0; lastRunRecord = false;
     Music.restart();
     spawnFood();
     scheduleBonus();
@@ -650,6 +652,7 @@
   function eat(points, isBonus, at) {
     eaten++;
     combo = gameTime - lastEatAt <= COMBO_WINDOW ? combo + 1 : 1;
+    maxCombo = Math.max(maxCombo, combo);
     lastEatAt = gameTime;
     const mult = combo >= 5 ? 3 : combo >= 3 ? 2 : 1;
     const earned = points * mult;
@@ -690,6 +693,7 @@
   }
 
   function die() {
+    lastRunLength = snake.length;
     state = "dying";
     deathTimer = DEATH_DELAY;
     ui.pauseBtn.disabled = true;
@@ -723,7 +727,8 @@
     list = list.slice(0, 5);
     store.set(key, list);
     lastSavedIndex = score > 0 ? list.indexOf(score) : -1;
-    ui.recordBadge.classList.toggle("hidden", !(score > 0 && score > prevBest));
+    lastRunRecord = score > 0 && score > prevBest;
+    ui.recordBadge.classList.toggle("hidden", !lastRunRecord);
     updateLeaderboard();
   }
 
@@ -1160,21 +1165,231 @@
     if (open) pauseGame();
   }
 
-  async function share() {
-    const url = location.origin + location.pathname;
-    const mode = isDaily ? `Daily ${dailyKey()}` : SPEEDS[runSpeed].label;
-    const text = `Snake · The Golden Circle\nRezultat: ${score} (${mode})\nIgraj i ti: ${url}\n#GoldenCircle #onegoldenboyy`;
-    if (navigator.share) {
-      try { await navigator.share({ title: "Snake · The Golden Circle", text }); } catch (e) {}
-      return;
-    }
+  // ---------- KARTICA SA REZULTATOM (story 1080x1920) ----------
+  const GAME_URL = "https://daliborsuvajcevic.github.io/snake/";
+  const IG_PATH = "M7 2h10a5 5 0 0 1 5 5v10a5 5 0 0 1-5 5H7a5 5 0 0 1-5-5V7a5 5 0 0 1 5-5z";
+
+  function spaced(c, text, x, y, spacing) {
+    // tekst sa razmakom između slova, centriran na x
+    const chars = [...text];
+    const widths = chars.map((ch) => c.measureText(ch).width);
+    const total = widths.reduce((a, b) => a + b, 0) + spacing * (chars.length - 1);
+    let cx = x - total / 2;
+    const align = c.textAlign;
+    c.textAlign = "left";
+    chars.forEach((ch, i) => { c.fillText(ch, cx, y); cx += widths[i] + spacing; });
+    c.textAlign = align;
+  }
+
+  async function makeScoreCard() {
     try {
-      await navigator.clipboard.writeText(text);
-      ui.shareBtn.textContent = "KOPIRANO";
-    } catch (e) {
-      ui.shareBtn.textContent = "NIJE USPELO";
+      await Promise.all([
+        document.fonts.load('800 120px "Poppins"'),
+        document.fonts.load('600 40px "Poppins"'),
+        document.fonts.load('500 40px "Poppins"'),
+      ]);
+    } catch (e) {}
+    if (!crownImg.complete) await new Promise((r) => crownImg.addEventListener("load", r, { once: true }));
+
+    const W = 1080, H = 1920;
+    const cv = document.createElement("canvas");
+    cv.width = W; cv.height = H;
+    const c = cv.getContext("2d");
+    const F = '"Poppins", system-ui, sans-serif';
+    const GOLD = "#FFB132", CREAM = "#F7F3EA", BLACK = "#111111";
+
+    // pozadina sa blagim zlatnim sjajem iza rezultata
+    c.fillStyle = BLACK;
+    c.fillRect(0, 0, W, H);
+    const glow = c.createRadialGradient(W / 2, 900, 0, W / 2, 900, 620);
+    glow.addColorStop(0, "rgba(255,177,50,0.10)");
+    glow.addColorStop(1, "rgba(255,177,50,0)");
+    c.fillStyle = glow;
+    c.fillRect(0, 0, W, H);
+
+    // tanak zlatni okvir
+    c.strokeStyle = "rgba(255,177,50,0.35)";
+    c.lineWidth = 2;
+    c.beginPath();
+    c.roundRect ? c.roundRect(56, 56, W - 112, H - 112, 40) : c.rect(56, 56, W - 112, H - 112);
+    c.stroke();
+
+    // kruna
+    const cw = 230, ch = cw * (crownImg.naturalHeight / crownImg.naturalWidth);
+    c.drawImage(crownImg, (W - cw) / 2, 190, cw, ch);
+
+    c.textAlign = "center";
+    c.textBaseline = "alphabetic";
+    c.fillStyle = "#FFFFFF";
+    c.font = `800 74px ${F}`;
+    spaced(c, "SNAKE", W / 2, 520, 26);
+    c.fillStyle = GOLD;
+    c.font = `600 27px ${F}`;
+    spaced(c, "THE GOLDEN CIRCLE", W / 2, 572, 10);
+
+    // mod
+    const mode = isDaily ? `DAILY · ${dailyKey()}` : SPEEDS[runSpeed].label.toUpperCase();
+    c.fillStyle = "rgba(247,243,234,0.55)";
+    c.font = `600 30px ${F}`;
+    spaced(c, mode, W / 2, 760, 9);
+
+    // rezultat (smanji font za velike brojeve)
+    const sTxt = String(score);
+    let size = 330;
+    c.font = `800 ${size}px ${F}`;
+    while (c.measureText(sTxt).width > W - 260 && size > 120) { size -= 10; c.font = `800 ${size}px ${F}`; }
+    c.fillStyle = GOLD;
+    c.shadowColor = "rgba(255,177,50,0.35)";
+    c.shadowBlur = 60;
+    c.fillText(sTxt, W / 2, 1050);
+    c.shadowBlur = 0;
+    c.fillStyle = "rgba(247,243,234,0.55)";
+    c.font = `600 30px ${F}`;
+    spaced(c, "POENA", W / 2, 1115, 9);
+
+    // novi rekord
+    let y = 1200;
+    if (lastRunRecord) {
+      c.font = `700 28px ${F}`;
+      const label = "NOVI REKORD";
+      const bw = 330, bh = 64;
+      c.fillStyle = GOLD;
+      c.beginPath();
+      c.roundRect ? c.roundRect((W - bw) / 2, y - 46, bw, bh, 32) : c.rect((W - bw) / 2, y - 46, bw, bh);
+      c.fill();
+      c.fillStyle = BLACK;
+      spaced(c, label, W / 2, y - 4, 7);
+      y += 70;
     }
-    setTimeout(() => { ui.shareBtn.textContent = "PODELI"; }, 1800);
+
+    // statistika: dužina i najveći combo
+    const stats = [["DUŽINA", String(lastRunLength)], ["MAX COMBO", "x" + Math.max(1, maxCombo)]];
+    const boxW = 340, boxH = 150, gap = 40;
+    const startX = (W - (boxW * 2 + gap)) / 2;
+    const by = y + 20;
+    stats.forEach(([label, val], i) => {
+      const x = startX + i * (boxW + gap);
+      c.strokeStyle = "rgba(247,243,234,0.12)";
+      c.lineWidth = 2;
+      c.beginPath();
+      c.roundRect ? c.roundRect(x, by, boxW, boxH, 26) : c.rect(x, by, boxW, boxH);
+      c.stroke();
+      c.fillStyle = "rgba(247,243,234,0.55)";
+      c.font = `600 24px ${F}`;
+      spaced(c, label, x + boxW / 2, by + 52, 6);
+      c.fillStyle = "#FFFFFF";
+      c.font = `700 56px ${F}`;
+      c.fillText(val, x + boxW / 2, by + 118);
+    });
+
+    // zmija kao dekoracija: zlatna linija koja vodi ka glavi
+    const sy = by + boxH + 85;
+    const pts = [];
+    for (let i = 0; i <= 14; i++) pts.push([200 + i * 48, sy + Math.sin(i * 0.75) * 26]);
+    for (let i = pts.length - 1; i >= 1; i--) {
+      const t = (i - 1) / (pts.length - 2);
+      c.strokeStyle = mixHex("#5E3F0E", "#E59A22", t);
+      c.lineWidth = lerp(18, 30, t);
+      c.lineCap = "round";
+      c.beginPath();
+      c.moveTo(pts[i - 1][0], pts[i - 1][1]);
+      c.lineTo(pts[i][0], pts[i][1]);
+      c.stroke();
+    }
+    const head = pts[pts.length - 1];
+    c.fillStyle = GOLD;
+    c.shadowColor = GOLD; c.shadowBlur = 30;
+    c.beginPath(); c.arc(head[0], head[1], 22, 0, Math.PI * 2); c.fill();
+    c.shadowBlur = 0;
+    // zlatni krug ispred glave
+    c.beginPath(); c.arc(head[0] + 90, head[1], 14, 0, Math.PI * 2); c.fill();
+    c.strokeStyle = "rgba(255,177,50,0.35)"; c.lineWidth = 3;
+    c.beginPath(); c.arc(head[0] + 90, head[1], 26, 0, Math.PI * 2); c.stroke();
+
+    // poziv i potpis
+    c.fillStyle = "#FFFFFF";
+    c.font = `700 52px ${F}`;
+    c.fillText("Možeš li bolje?", W / 2, 1668);
+    c.fillStyle = "rgba(247,243,234,0.55)";
+    c.font = `500 28px ${F}`;
+    c.fillText(GAME_URL.replace("https://", "").replace(/\/$/, ""), W / 2, 1720);
+
+    // instagram potpis
+    c.font = `600 32px ${F}`;
+    const handle = "@onegoldenboyy";
+    const tw = c.measureText(handle).width;
+    const iconS = 36, gapI = 16;
+    const total = iconS + gapI + tw;
+    const ix = (W - total) / 2, iy = 1794;
+    c.save();
+    c.translate(ix, iy - iconS + 6);
+    c.scale(iconS / 24, iconS / 24);
+    c.strokeStyle = GOLD; c.lineWidth = 1.8;
+    c.stroke(new Path2D(IG_PATH));
+    c.beginPath(); c.arc(12, 12, 4.2, 0, Math.PI * 2); c.stroke();
+    c.fillStyle = GOLD; c.beginPath(); c.arc(17.3, 6.7, 1.1, 0, Math.PI * 2); c.fill();
+    c.restore();
+    c.fillStyle = GOLD;
+    c.textAlign = "left";
+    c.fillText(handle, ix + iconS + gapI, iy);
+    c.textAlign = "center";
+
+    return cv;
+  }
+
+  // ---------- DELJENJE ----------
+  const shareModal = $("#share-modal");
+  const shareImg = $("#share-img");
+  const shareGo = $("#share-go");
+  const shareSave = $("#share-save");
+  const shareCopy = $("#share-copy");
+  let shareFile = null, shareUrl = null;
+
+  function shareText() {
+    const mode = isDaily ? `Daily ${dailyKey()}` : SPEEDS[runSpeed].label;
+    return `Snake · The Golden Circle\nRezultat: ${score} (${mode})\nMožeš li bolje? ${GAME_URL}\n#GoldenCircle #onegoldenboyy`;
+  }
+
+  async function openShare() {
+    ui.shareBtn.disabled = true;
+    ui.shareBtn.textContent = "PRAVIM...";
+    try {
+      const cv = await makeScoreCard();
+      const blob = await new Promise((r) => cv.toBlob(r, "image/png"));
+      if (shareUrl) URL.revokeObjectURL(shareUrl);
+      shareUrl = URL.createObjectURL(blob);
+      shareFile = new File([blob], `snake-rezultat-${score}.png`, { type: "image/png" });
+      shareImg.src = shareUrl;
+      shareSave.href = shareUrl;
+      shareSave.download = shareFile.name;
+      const canFiles = !!(navigator.canShare && navigator.canShare({ files: [shareFile] }));
+      shareGo.classList.toggle("hidden", !canFiles);
+      shareSave.classList.toggle("btn-primary", !canFiles);
+      shareSave.classList.toggle("btn-ghost", canFiles);
+      shareModal.classList.add("open");
+    } catch (e) {
+      toast("Slika nije napravljena", "Pokušaj ponovo");
+    }
+    ui.shareBtn.disabled = false;
+    ui.shareBtn.textContent = "PODELI";
+  }
+  function closeShare() { shareModal.classList.remove("open"); }
+
+  async function shareImage() {
+    if (!shareFile) return;
+    try {
+      await navigator.share({ files: [shareFile], title: "Snake · The Golden Circle" });
+      closeShare();
+    } catch (e) { /* korisnik je odustao */ }
+  }
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(shareText());
+      shareCopy.textContent = "KOPIRANO";
+    } catch (e) {
+      shareCopy.textContent = "NIJE USPELO";
+    }
+    setTimeout(() => { shareCopy.textContent = "KOPIRAJ TEKST"; }, 1800);
   }
 
   // ---------- DOGAĐAJI: DUGMAD ----------
@@ -1193,7 +1408,11 @@
   tap(ui.pauseMenuBtn, toMenu);
   tap(ui.againBtn, () => newRun(false));
   tap(ui.overMenuBtn, toMenu);
-  tap(ui.shareBtn, share);
+  tap(ui.shareBtn, openShare);
+  shareGo.addEventListener("click", shareImage);
+  shareCopy.addEventListener("click", copyLink);
+  $("#share-close").addEventListener("click", closeShare);
+  shareModal.addEventListener("click", (e) => { if (e.target === shareModal) closeShare(); });
   tap(ui.pauseBtn, () => (state === "paused" ? resumeGame() : pauseGame()));
   tap(ui.musicBtn, () => { Music.toggle(); updateMusicBtn(); });
   tap(ui.soundBtn, () => {

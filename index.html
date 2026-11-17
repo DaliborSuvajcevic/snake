@@ -5,6 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <title>Snake · The Golden Circle</title>
   <meta name="description" content="Snake by The Golden Circle. Igraj u browseru ili instaliraj kao aplikaciju.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Snake · The Golden Circle">
+  <meta property="og:description" content="Možeš li bolje? Igraj u browseru ili instaliraj na telefon.">
+  <meta property="og:url" content="https://daliborsuvajcevic.github.io/snake/">
+  <meta property="og:image" content="https://daliborsuvajcevic.github.io/snake/assets/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://daliborsuvajcevic.github.io/snake/assets/og-image.png">
   <meta name="theme-color" content="#111111">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -132,6 +141,20 @@
         <ul id="achievements-list" class="achievements"></ul>
       </section>
     </aside>
+  </div>
+
+  <!-- DELJENJE: pregled kartice sa rezultatom -->
+  <div class="share-modal" id="share-modal" role="dialog" aria-label="Podeli rezultat">
+    <div class="share-sheet">
+      <img id="share-img" class="share-img" alt="Kartica sa rezultatom">
+      <p class="hint only-touch">Možeš i da zadržiš prst na slici i sačuvaš je</p>
+      <button class="btn btn-primary" id="share-go">PODELI SLIKU</button>
+      <a class="btn btn-ghost btn-link" id="share-save" href="#" download>SAČUVAJ SLIKU</a>
+      <div class="btn-row">
+        <button class="btn btn-ghost" id="share-copy">KOPIRAJ TEKST</button>
+        <button class="btn btn-ghost" id="share-close">ZATVORI</button>
+      </div>
+    </div>
   </div>
 
   <div id="toasts" aria-live="polite"></div>
